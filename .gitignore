@@ -1,2 +1,4 @@
 .env
 *.parquet
+*.json
+*.webp
