@@ -2,3 +2,7 @@
 *.parquet
 *.json
 *.webp
+*.jpeg
+*.jpg
+*.png
+Notes.txt
