@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 import re
 from urllib.parse import urlparse, parse_qs
 from PIL import Image
+from io import BytesIO
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Limit to 10 million pixels to prevent large decompressions
+Image.MAX_IMAGE_PIXELS = 25000000 
 
 # load environment variables
 load_dotenv()
@@ -22,7 +28,7 @@ reddit = praw.Reddit(
 )
 
 # Configuration
-POST_LIMIT = 10
+POST_LIMIT = 1000
 SUBREDDIT_NAME = "dataengineering"  # Change as needed
 SUBREDDIT_DIR = Path(f"reddit_data_{SUBREDDIT_NAME}") # Main subreddit folder
 IMAGE_DIR = SUBREDDIT_DIR / f"images_{SUBREDDIT_NAME}" # Store images
@@ -43,20 +49,64 @@ def fetch_posts(subreddit_name, limit=POST_LIMIT):
     yield from subreddit.new(limit=limit)
 
 
-# multi-thread image processing
+# Configure retry strategy for requests
+retry_strategy = Retry(
+    total=3,                # Max retries
+    backoff_factor=1,       # Exponential backoff (1s, 2s, 4s)
+    status_forcelist=[429, 500, 502, 503, 504],  # Retry on these status codes
+    allowed_methods=["GET"],  # Only retry for GET requests
+)
+
+# Mount retry strategy to a session
+session = requests.Session()
+session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
+
+
+# Image download with retry mechanism
 def download_image(image_url, post_id):
+    """Download an image and save it as WEBP, retrying with headers"""
+    image_path = IMAGE_DIR / f"{post_id}.webp"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    try:
+        response = session.get(image_url, stream=True)  # Try without headers first
+        response.raise_for_status()
+    except requests.RequestException:
+        try:
+            response = session.get(image_url, headers=headers, stream=True)  # Retry with headers
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"Image download failed after retries: {e}")
+            return None
+
+    # Process and save the image if successful
+    try:
+        image = Image.open(BytesIO(response.content))
+        image.save(image_path, "WEBP", quality=80)
+        return str(image_path)
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return None
+
+def download_comment_image(image_url, comment_id):
+    """Download and save an image from a comment if it contains an image URL."""
+    if not image_url:
+        return None  # No valid image to download
+
     try:
         response = requests.get(image_url, stream=True)
         if response.status_code == 200:
-            image_path = IMAGE_DIR / f"{post_id}.webp"
-            
-            with open(image_path, "wb") as f:
-                for chunk in response.iter_content(1024):
-                    f.write(chunk)
+            image = Image.open(BytesIO(response.content))
+
+            image_path = IMAGE_DIR / f"comment_{comment_id}.webp"
+            image.save(image_path, "WEBP", quality=80)
+
             return str(image_path)
     except Exception as e:
-        print(f"Image download failed: {e}")
+        print(f"Failed to download image for comment {comment_id}: {e}")
         return None
+
     
 # Process images concurrently
 def process_images_concurrently(posts):
@@ -92,44 +142,35 @@ def extract_image_url(comment_text):
     urls = re.findall(url_pattern, comment_text)
 
     for url in urls:
-        parsed_url = urlparse(url)
-        path = parsed_url.path.lower()
+        try:
+            # Try to parse the URL
+            parsed_url = urlparse(url)
+            path = parsed_url.path.lower()
 
-        # Check if the URL has a valid image extension
-        if path.endswith(image_extensions):
-            return url
+            # Check if the URL has a valid image extension
+            if path.endswith(image_extensions):
+                return url
 
-        # Handle Reddit's image links with query parameters (e.g., ?format=pjpg)
-        query_params = parse_qs(parsed_url.query)
-        if "format" in query_params:
-            format_value = query_params["format"][0]
-            if format_value in ["jpg", "jpeg", "png", "webp"]:
-                return url 
+            # Handle Reddit's image links with query parameters (e.g., ?format=pjpg)
+            query_params = parse_qs(parsed_url.query)
+            if "format" in query_params:
+                format_value = query_params["format"][0]
+                if format_value in ["jpg", "jpeg", "png", "webp"]:
+                    return url 
+
+        except ValueError as e:
+            # If there's a ValueError, print the error and skip to the next URL
+            print(f"Skipping invalid URL: {url} due to error: {e}")
+            continue  # Continue with the next URL
 
     return None  # No valid image found
 
-def download_comment_image(image_url, comment_id):
-    """Download and save an image from a comment if it contains an image URL."""
-    if not image_url:
-        return None  # No valid image to download
-
-    try:
-        response = requests.get(image_url, stream=True)
-        if response.status_code == 200:
-            ext = image_url.split('.')[-1].split('?')[0]  # Extract extension safely
-            image_path = IMAGE_DIR / f"comment_{comment_id}.{ext}"
-
-            with open(image_path, "wb") as f:
-                for chunk in response.iter_content(1024):
-                    f.write(chunk)
-
-            return str(image_path)
-    except Exception as e:
-        print(f"Failed to download image for comment {comment_id}: {e}")
-        return None
 
 
 # Collecting Post Data & Comments efficiently in a list comprehension
+
+fetched_posts = fetch_posts(SUBREDDIT_NAME, limit=POST_LIMIT)
+
 posts_data = [
     {
         "post_id": post.id,
@@ -139,7 +180,7 @@ posts_data = [
         "created_time": datetime.fromtimestamp(post.created_utc, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
         "image_url": post.url if post.url.endswith(('.jpg', '.jpeg', '.png')) else None,
     }
-    for post in fetch_posts(SUBREDDIT_NAME, limit=POST_LIMIT) if post.id not in cached_posts
+    for post in fetched_posts if post.id not in cached_posts
 ]
 
 comments_data = [
