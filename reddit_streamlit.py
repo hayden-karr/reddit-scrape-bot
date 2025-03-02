@@ -2,6 +2,7 @@ import streamlit as st
 import polars as pl
 from pathlib import Path
 import os
+import time
 
 # Load Data
 SUBREDDIT_NAME = "dataengineering"
@@ -65,32 +66,39 @@ def get_post_chunk(start, chunk_size):
 post_chunk = get_post_chunk(st.session_state.post_index, chunk_size)
 
 if post_chunk is not None:
-    for post in post_chunk.iter_rows(named=True):
-        with st.container():
-            st.subheader(post["title"])
-            st.write(post["text"])
+    total_posts = len(posts)
 
-            if "image_path" in post and post["image_path"]:
-                image_path = post["image_path"]
-                if os.path.isfile(image_path):
-                    st.image(image_path, use_container_width=True)
-                else:
-                    st.error(f"Image not found: {image_path}")
-            
-            st.write("---")
-            with st.expander("**Comments:**"):
-                display_comments(comments, post["post_id"], level=0)
-            st.write("---")
+    post_container = st.empty()
+
+    with post_container.container():
+        for post in post_chunk.iter_rows(named=True):
+                st.subheader(post["title"])
+                st.write(post["text"])
+
+                if "image_path" in post and post["image_path"]:
+                    image_path = post["image_path"]
+                    if os.path.isfile(image_path):
+                        st.image(image_path, use_container_width=True)
+                    else:
+                        st.error(f"Image not found: {image_path}")
+                
+                st.write("---")
+                with st.expander("**Comments:**"):
+                    display_comments(comments, post["post_id"], level=0)
+                st.write("---")
     
     col1, col2 = st.columns([1, 1])
+
     with col1:
         if st.session_state.post_index > 0:
             if st.button("Previous Posts"):
                 st.session_state.post_index = max(0, st.session_state.post_index - chunk_size)
                 st.rerun()
     with col2:
-        if st.session_state.post_index + chunk_size < len(posts):
+        if st.session_state.post_index + chunk_size < total_posts:
             if st.button("Next Posts"):
+                with st.spinner("Loading more posts..."):
+                    time.sleep(.5)  # Simulate smooth transition
                 st.session_state.post_index += chunk_size
                 st.rerun()
 else:
