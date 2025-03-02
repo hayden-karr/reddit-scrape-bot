@@ -10,11 +10,16 @@ POSTS_FILE = SUBREDDIT_DIR / f"reddit_posts_{SUBREDDIT_NAME}.parquet"
 COMMENTS_FILE = SUBREDDIT_DIR / f"reddit_comments_{SUBREDDIT_NAME}.parquet"
 IMAGE_DIR = SUBREDDIT_DIR / f"images_{SUBREDDIT_NAME}"
 
+# Chunks for post loading amount
+chunk_size = 5
+
 # Load posts
+@st.cache_data
 def load_posts():
     return pl.read_parquet(POSTS_FILE) if POSTS_FILE.exists() else None
 
 # Load comments
+@st.cache_data
 def load_comments():
     return pl.read_parquet(COMMENTS_FILE) if COMMENTS_FILE.exists() else None
 
@@ -32,7 +37,7 @@ def display_comments(comments, parent_id, level=0):
         st.markdown(f"<pre>{formatted_text}</pre>", unsafe_allow_html=True)
 
         # Display comment images if available
-        if comment["image_path"]:
+        if "image_path" in comment and comment["image_path"]:
             image_path = comment["image_path"]
             if os.path.isfile(image_path):
                 st.image(image_path, width=250)
@@ -49,22 +54,15 @@ st.title(f"r/{SUBREDDIT_NAME} - Local Reddit Viewer")
 posts = load_posts()
 comments = load_comments()
 
+if "loaded_posts" not in st.session_state:
+    st.session_state.loaded_posts = 0 # Tracks how many posts are displayed
+
+
 if posts is not None and comments is not None:
-    # Pagination Setup
-    batch_size = 25  # Number of posts per page
-    total_pages = len(posts) // batch_size + (1 if len(posts) % batch_size > 0 else 0)
+    total_posts = len(posts)
 
-    # User selects the page
-    page_number = st.number_input("Page", min_value=1, max_value=total_pages, step=1, value=1)
-
-    # Slice data efficiently
-    start_idx = (page_number - 1) * batch_size
-    end_idx = start_idx + batch_size
-    posts_batch = posts.slice(start_idx, batch_size)
-
-
-    # Display posts
-    for post in posts.iter_rows(named=True):
+    # Display posts in chunks
+    for post in posts.slice(0, st.session_state.loaded_posts + chunk_size).iter_rows(named=True):
         with st.container():
             st.subheader(post["title"])
             st.write(post["text"])
@@ -81,7 +79,12 @@ if posts is not None and comments is not None:
                 display_comments(comments, post["post_id"], level=0)
             st.write("---")
 
-    st.write(f"Page {page_number} of {total_pages}")
+    # Load more Button
+    if st.session_state.loaded_posts + chunk_size < total_posts:
+        if st.button("Load More Posts"):
+            st.session_state.loaded_posts += chunk_size
+            st.rerun()
+
 else:
     st.warning("No data found. Make sure you've scraped posts and comments.")
 
