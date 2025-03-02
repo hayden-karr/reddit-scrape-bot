@@ -54,37 +54,45 @@ st.title(f"r/{SUBREDDIT_NAME} - Local Reddit Viewer")
 posts = load_posts()
 comments = load_comments()
 
-if "loaded_posts" not in st.session_state:
-    st.session_state.loaded_posts = 0 # Tracks how many posts are displayed
+if "post_index" not in st.session_state:
+    st.session_state.post_index = 0
 
+def get_post_chunk(start, chunk_size):
+    if posts is not None:
+        return posts.slice(start, chunk_size)
+    return None
 
-if posts is not None and comments is not None:
-    total_posts = len(posts)
+post_chunk = get_post_chunk(st.session_state.post_index, chunk_size)
 
-    # Display posts in chunks
-    for post in posts.slice(0, st.session_state.loaded_posts + chunk_size).iter_rows(named=True):
+if post_chunk is not None:
+    for post in post_chunk.iter_rows(named=True):
         with st.container():
             st.subheader(post["title"])
             st.write(post["text"])
 
             if "image_path" in post and post["image_path"]:
-                image_path = post["image_path"]  
-                if os.path.isfile(image_path):  
+                image_path = post["image_path"]
+                if os.path.isfile(image_path):
                     st.image(image_path, use_container_width=True)
                 else:
                     st.error(f"Image not found: {image_path}")
-
+            
             st.write("---")
             with st.expander("**Comments:**"):
                 display_comments(comments, post["post_id"], level=0)
             st.write("---")
-
-    # Load more Button
-    if st.session_state.loaded_posts + chunk_size < total_posts:
-        if st.button("Load More Posts"):
-            st.session_state.loaded_posts += chunk_size
-            st.rerun()
-
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.session_state.post_index > 0:
+            if st.button("Previous Posts"):
+                st.session_state.post_index = max(0, st.session_state.post_index - chunk_size)
+                st.rerun()
+    with col2:
+        if st.session_state.post_index + chunk_size < len(posts):
+            if st.button("Next Posts"):
+                st.session_state.post_index += chunk_size
+                st.rerun()
 else:
     st.warning("No data found. Make sure you've scraped posts and comments.")
 
