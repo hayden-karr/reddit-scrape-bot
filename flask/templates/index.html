@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>r/{{ subreddit }}</title>
+    <style>
+        /* General page styling */
+        body {
+            display: flex;
+            justify-content: flex-start;
+            /* Centers content horizontally */
+            align-items: center;
+            /* Aligns content from the top */
+            min-height: 100vh;
+            /* Ensure it takes full height */
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #18181a;
+            padding-top: 20px;
+            /* Adds some space from the top */
+            text-align: center;
+            /* Centers all text */
+            flex-direction: column;
+            overflow-x: hidden;  /* Prevent horizontal scrolling */
+        }
+
+        /* Main content container */
+        #gallery {
+            display: flex;
+            flex-direction: column;
+            /* Stack posts vertically */
+            align-items: center;
+            /* Center posts horizontally */
+            justify-content: flex-start;
+            gap: 30px;
+            width: 100%;
+            max-width: 1500px;
+            /* Max width to prevent stretching - make gallery container wider */
+            padding: 0 20px;
+            /* Padding on left and right for spacing */
+        }
+
+        /* Each image gallery post */
+        .image-container {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            text-align: left;
+            justify-content: center;
+            width: 100%;
+            max-width: 900px;
+            /* Limit size of individual post galleries - make individual post larger*/
+            padding: 15px;
+            background-color: black;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            /* margin-bottom: 20px;  Ensures spacing between posts */
+        }
+
+        /* Image inside each post */
+        .image-container img {
+            width: 100%;
+            /* Take the full width of the container */
+            max-width: 100%;
+            height: auto;
+            /* Scale the image height accordingly */
+            object-fit: contain;
+            /* Keep aspect ratio intact */
+            border-radius: 8px;
+            margin-top: 10px;
+            align-self: center;
+            margin-bottom: 10px
+        }
+
+        /* Title Styling */
+        h1 {
+            color: #ffffff;
+            margin: 0;
+            font-size: 28px;
+            align-self: center;
+            max-width: 100%;
+        }
+
+        #subreddit-title {
+            text-align: center; /* Centers text */
+            width: 100%; /* Ensures full width */
+            margin: 20px 0; /* Adds spacing */
+            font-size: 2rem; /* Adjust size if needed */
+            color: white; /* Match styling */
+        }
+
+        /* Post title inside the gallery */
+        h2 {
+            color: #ffffff;
+            margin: 10px 0;
+            font-size: 24px;
+            align-self: center;
+            max-width: 100%;
+        }
+
+        /* Style for fallback message (No image available) */
+        .fallback-text {
+            font-size: 14px;
+            color: #888;
+            font-style: italic;
+            align-self: center;
+        }
+
+        /* Style for post text */
+        .post-text {
+            font-size: 18px;
+            color: #ddd;  /* Lighter than white for readability */
+            align-self: center;
+            text-align: left;
+            margin-top: 10px;
+        }
+
+        /* Collapsible comments styling */
+        .comment {
+            padding: 10px;
+            margin-left: 0;
+            margin-top: 10px;
+            text-align: left;
+            max-width: 100%;
+            word-wrap: break-word; /* Breaks long words */
+            white-space: normal; /* Allows text to wrap */
+            overflow-wrap: break-word; /* Ensures text stays within bounds */
+        }
+
+        .comment * { /* Apply to all child elements */
+            max-width: 100%; 
+            overflow-wrap: break-word; 
+            word-break: break-word;
+        }
+
+        /* Ensure comment images stay within 250px */
+        .comment img {
+            max-width: 250px;
+            width: 100%; /* Ensures responsiveness */
+            height: auto; /* Maintain aspect ratio */
+            display: block; /* Prevent inline spacing issues */
+            margin-top: 5px; /* Adds a little space */
+        }
+
+        .replies {
+            padding-left: 20px;
+            max-width: 100%;
+            word-wrap: break-word; /* Breaks long words */
+            white-space: normal; /* Allows text to wrap */
+            overflow-wrap: break-word; /* Ensures text stays within bounds */
+        }
+
+        /* Styling for the toggle comments dropdown */
+        .toggle-comments {
+            color: #ddd;
+            cursor: pointer;
+            font-weight: bold;
+            align-self: center;
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+
+        /* Default arrow styling */
+        .arrow {
+            transition: transform 0.3s ease;  /* Smooth rotation effect */
+        }
+
+        /* Rotate arrow when active */
+        .arrow.active {
+            transform: rotate(90deg);
+        }
+
+        .indent {
+            margin-left: 20px;
+        }
+    </style>
+
+</head>
+
+<script>
+        isLoading = false
+        let loadedChunks = []; // Keeps track of loaded chunks
+        let totalChunks = 0;  // Initialize totalChunks
+
+        async function fetchTotalChunks() {
+            try {
+                let response = await fetch("/totalChunks");
+                let data = await response.json();
+                totalChunks = data.totalChunks;  
+                console.log(`Total Chunks: ${totalChunks}`);
+            } catch (error) {
+                console.error("Error fetching total chunks:", error);
+            }
+        }
+
+        // Function to render comments
+        function renderComments(comments, depth = 1) {
+            if (!comments || comments.length === 0) return "";
+        
+            return comments.map(comment => `
+                <div class="comment">
+                    <p style="color: white;">${'-'.repeat(depth)} ${comment.text}</p>
+                    ${comment.image ? `<img src="/images/${comment.image}" alt="comment image" width="250">` : ""}
+                    <div class="replies">${renderComments(comment.replies || [], depth + 1)}</div>
+                </div>
+            `).join("");
+        }
+    
+        // Function to toggle comments
+        window.toggleComments = function (postId) {
+            let commentSection = document.getElementById("comments-" + postId);
+            let arrow = document.getElementById("arrow-" + postId);
+    
+            if (commentSection.style.display === "none" || commentSection.style.display === "") {
+                commentSection.style.display = "block";
+                arrow.classList.add("active");
+            } else {
+                commentSection.style.display = "none";
+                arrow.classList.remove("active");
+            }
+        };
+    
+        // Function to insert posts into the gallery
+        function insertPostsIntoGallery(posts, chunk, direction = "down") {
+            if (!posts || posts.length === 0) return;
+
+            console.log(`Inserted chunk ${chunk}. Loaded chunks:`, loadedChunks);
+
+            const gallery = document.getElementById("gallery");
+            let htmlContent = posts.map(post => `
+                <div class="image-container post-chunk-${chunk}" id="post-${post.post_id}">
+                    <h2>${post.title}</h2>
+                    ${post.image ? `<img src="/images/${post.image}" alt="${post.image}">` : `<p class="fallback-text">No image available</p>`}
+                    <p class="post-text">${post.text}</p>
+                    <div class="toggle-comments" onclick="toggleComments('${post.post_id}')">
+                        Comments <span class="arrow" id="arrow-${post.post_id}">▶</span>
+                    </div>
+                    <div id="comments-${post.post_id}" style="display: none;">
+                        ${renderComments(post.comments)}
+                    </div>
+                </div>
+            `).join("");
+
+            if (direction === "up") {
+                loadedChunks.unshift(chunk);
+                gallery.insertAdjacentHTML("afterbegin", htmlContent);
+            } else {
+                loadedChunks.push(chunk);
+                gallery.insertAdjacentHTML("beforeend", htmlContent);
+            }
+        }
+    
+        // Function to load a specific chunk and insert it into the gallery
+        async function loadPosts(chunk, direction = "down") {
+            if (isLoading || loadedChunks.includes(chunk)) return; // Prevent duplicate loads
+            isLoading = true;
+
+            console.log(`Loading chunk ${chunk}...`);
+
+            try {
+                let response = await fetch(`/load_posts?chunk=${chunk}`);
+                let data = await response.json();
+
+                if (data.posts) {
+                    insertPostsIntoGallery(data.posts, chunk, direction);
+                    console.log(`Chunk ${chunk} loaded successfully!`);
+                } else {
+                    console.log(`No more posts in chunk ${chunk}.`);
+                }
+            } catch (error) {
+                console.error("Error loading posts:", error);
+            }
+
+            isLoading = false;
+        }
+
+        // Function to load multiple chunks in order
+        async function loadMultipleChunks(chunksArray, direction= "down") {
+            for (let chunk of chunksArray) {
+                await loadPosts(chunk, direction);
+            }
+        }
+
+        async function handleScroll() {
+            if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 10) {
+                console.log("Scrolled to the bottom! Cycling forward...");
+
+                // Check if we've reached the last chunk
+                if (loadedChunks.includes(totalChunks)) {
+                    console.log("All chunks loaded, stopping further loads.");
+                    return; // Stop loading more chunks
+                }
+
+                if (loadedChunks.length >= 3) {
+                    let oldestChunk = loadedChunks.shift(); // Remove the oldest chunk
+                    document.querySelectorAll(`.post-chunk-${oldestChunk}`).forEach(el => el.remove());
+                    console.log(`Removed chunk ${oldestChunk}`);
+                }
+
+                let newChunk = loadedChunks[loadedChunks.length - 1] + 1; // Get next chunk number
+                
+                console.log(newChunk);
+                
+                await loadMultipleChunks([newChunk], "down"); // Load at bottom
+
+            }
+
+            if (window.scrollY <= 10) {
+                console.log("Scrolled to the top! Cycling backward...");
+
+                if (loadedChunks.length >= 3) {
+                    if (!loadedChunks.includes(1)) {
+                        let newestChunk = loadedChunks.pop(); // Remove the newest chunk
+                        document.querySelectorAll(`.post-chunk-${newestChunk}`).forEach(el => el.remove());
+                        console.log(`Removed chunk ${newestChunk}`);
+                    }
+
+                    let oldChunk = loadedChunks[0] - 1;
+                    if (oldChunk < 1) return; // Prevent loading negative chunks
+
+                    console.log(oldChunk);
+
+                    /** Step 1: Capture the first visible post **/
+                    let firstVisiblePost = document.querySelector(".image-container");
+                    let firstPostId = firstVisiblePost ? firstVisiblePost.id : null;
+
+                    await loadMultipleChunks([oldChunk], "up");
+
+                    /** Step 2: Restore scroll position to the first post **/
+                    if (firstPostId) {
+                        let newFirstPost = document.getElementById(firstPostId);
+                        if (newFirstPost) {
+                            newFirstPost.scrollIntoView({ block: "start", behavior: "instant" });
+                        }
+                    }
+                }
+            }
+        }
+    
+        // Load initial three chunks sequentially
+        document.addEventListener("DOMContentLoaded", () => {
+            loadMultipleChunks([1, 2, 3]);
+            fetchTotalChunks();
+        });
+
+        document.addEventListener("DOMContentLoaded", function () {
+            window.addEventListener("scroll", handleScroll);
+        });
+</script>
+    
+<body>
+    <h1 id="subreddit-title">r/{{ subreddit }}</h1>
+    <div id="gallery"></div>
+</body>
+
+</html>

@@ -6,3 +6,6 @@
 *.jpg
 *.png
 Notes.txt
+streamlit
+.gitignore
+test.py

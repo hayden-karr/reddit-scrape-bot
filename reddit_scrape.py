@@ -28,9 +28,9 @@ reddit = praw.Reddit(
 )
 
 # Configuration
-POST_LIMIT = 1000
+POST_LIMIT = 100
 SUBREDDIT_NAME = "dataengineering"  # Change as needed
-SUBREDDIT_DIR = Path(f"reddit_data_{SUBREDDIT_NAME}") # Main subreddit folder
+SUBREDDIT_DIR = Path("scraped_subreddits") / f"reddit_data_{SUBREDDIT_NAME}" # Main subreddit folder
 IMAGE_DIR = SUBREDDIT_DIR / f"images_{SUBREDDIT_NAME}" # Store images
 CACHE_FILE = SUBREDDIT_DIR / f"cache_{SUBREDDIT_NAME}.json"  # Cache file for this subreddit
 DATA_FILE = SUBREDDIT_DIR / f"reddit_posts_{SUBREDDIT_NAME}.parquet"  # Parquet file with subreddit name
@@ -120,9 +120,8 @@ def save_parquet(new_data):
         df = pl.concat([existing_df, new_data], how="vertical").unique(subset=["post_id"])
     else:
         df = new_data
-    df = df.sort("created_utc", descending=True) # sort by post time in desc so most recent at the top
-    df.write_parquet(DATA_FILE, compression="zstd")
-
+    df = df.sort("created_utc", descending=True).write_parquet(DATA_FILE, compression="zstd") # sort by post time in desc so most recent at the top
+    
 # Save Comments Data Separately
 def save_comments_parquet(new_comments):
     if COMMENTS_FILE.exists():
@@ -153,10 +152,8 @@ def extract_image_url(comment_text):
 
             # Handle Reddit's image links with query parameters (e.g., ?format=pjpg)
             query_params = parse_qs(parsed_url.query)
-            if "format" in query_params:
-                format_value = query_params["format"][0]
-                if format_value in ["jpg", "jpeg", "png", "webp"]:
-                    return url 
+            if "format" in query_params and query_params["format"][0] in ["jpg", "jpeg", "png", "webp"]:
+                return url 
 
         except ValueError as e:
             # If there's a ValueError, print the error and skip to the next URL
@@ -212,12 +209,10 @@ with open(CACHE_FILE, "w") as f:
 
 # Convert to Polars DataFrame & save
 if posts_data:
-    new_df = pl.DataFrame(posts_data)
-    save_parquet(new_df)
+    save_parquet(pl.DataFrame(posts_data))
 
 # Convert Comments to Polars DataFrame & save
 if comments_data:
-    new_df_2 = pl.DataFrame(comments_data)
-    save_comments_parquet(new_df_2)
+    save_comments_parquet(pl.DataFrame(comments_data))
 
 print(f"Scraping Complete! {len(posts_data)} new posts added.")
