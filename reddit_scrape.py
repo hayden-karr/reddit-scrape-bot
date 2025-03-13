@@ -28,8 +28,8 @@ reddit = praw.Reddit(
 )
 
 # Configuration
-POST_LIMIT = 100
-SUBREDDIT_NAME = "dataengineering"  # Change as needed
+POST_LIMIT = 5
+SUBREDDIT_NAME = "dataenginnering"  # Change as needed
 SUBREDDIT_DIR = Path("scraped_subreddits") / f"reddit_data_{SUBREDDIT_NAME}" # Main subreddit folder
 IMAGE_DIR = SUBREDDIT_DIR / f"images_{SUBREDDIT_NAME}" # Store images
 CACHE_FILE = SUBREDDIT_DIR / f"cache_{SUBREDDIT_NAME}.json"  # Cache file for this subreddit
@@ -115,17 +115,46 @@ def process_images_concurrently(posts):
 
 # Save data incrementally
 def save_parquet(new_data):
+
+    # Define schema
+    post_schema = {
+        "post_id": pl.Utf8,
+        "title": pl.Utf8,
+        "text": pl.Utf8,
+        "created_utc": pl.Int64,
+        "created_time": pl.Utf8,
+        "image_url": pl.Utf8,
+        "image_path": pl.Utf8
+    }
+
+    # Apply schema to new data
+    new_data = new_data.cast(post_schema)
+
     if DATA_FILE.exists():
-        existing_df = pl.read_parquet(DATA_FILE)
+        existing_df = pl.read_parquet(DATA_FILE).cast(post_schema)
         df = pl.concat([existing_df, new_data], how="vertical").unique(subset=["post_id"])
     else:
         df = new_data
-    df = df.sort("created_utc", descending=True).write_parquet(DATA_FILE, compression="zstd") # sort by post time in desc so most recent at the top
+
+    df.sort("created_utc", descending=True).write_parquet(DATA_FILE, compression="zstd") # sort by post time in desc so most recent at the top
     
 # Save Comments Data Separately
 def save_comments_parquet(new_comments):
+
+    # Define schema
+    comment_schema = {
+        "comment_id": pl.Utf8,
+        "post_id": pl.Utf8,
+        "parent_id": pl.Utf8,
+        "text": pl.Utf8,
+        "image_url": pl.Utf8,
+        "image_path": pl.Utf8
+    }
+
+    new_comments = new_comments.cast(comment_schema)
+
     if COMMENTS_FILE.exists():
-        existing_df = pl.read_parquet(COMMENTS_FILE)
+        existing_df = pl.read_parquet(COMMENTS_FILE).cast(comment_schema)
         df = pl.concat([existing_df, new_comments], how="vertical").unique(subset=["comment_id"])
     else:
         df = new_comments
