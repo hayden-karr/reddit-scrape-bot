@@ -1,104 +1,210 @@
-from flask import Flask, render_template, send_from_directory, request, jsonify
-import polars as pl
-import os
-from pathlib import Path
-from math import ceil
+"""
+Reddit Subreddit Data Viewer Backend
 
+This Flask application serves as a backend for viewing Reddit subreddit data,
+including posts, comments, and associated images that have been previously scraped.
+
+"""
+
+import os
+from math import ceil
+from pathlib import Path
+from typing import Dict, List, Optional #Union
+
+
+import polars as pl
+from flask import Flask, jsonify, render_template, request, send_from_directory
+
+
+class RedditDataManager:
+    """Manager for Reddit data access and processing."""
+
+    def __init__(self, subreddit_name: str):
+        """
+        Initialize the Reddit data manager.
+
+        Args:
+            subreddit_name: Name of the subreddit to manage
+        """
+        self.subreddit_name = subreddit_name
+        self.base_dir = Path(__file__).resolve().parent.parent / "scraped_subreddits"
+        self.subreddit_dir = self.base_dir / f"reddit_data_{subreddit_name}"
+        self.posts_file = self.subreddit_dir / f"reddit_posts_{subreddit_name}.parquet"
+        self.comments_file = (self.subreddit_dir / f"reddit_comments_{subreddit_name}.parquet")
+        self.image_dir = self.subreddit_dir / f"images_{subreddit_name}"
+
+        # Ensure image directory exists
+        os.makedirs(self.image_dir, exist_ok=True)
+
+        # Cache for loaded data
+        self._posts_cache = None
+        self._comments_cache = None
+
+    def _extract_filename(self, path: Optional[str]) -> Optional[str]:
+        """Extract filename from a path."""
+        return path.split("\\")[-1] if path else None
+
+    def load_posts(self) -> Optional[pl.DataFrame]:
+        """Load posts from parquet file with caching."""
+        if self._posts_cache is None and self.posts_file.exists():
+            self._posts_cache = pl.read_parquet(self.posts_file)
+        return self._posts_cache
+
+    def load_comments(self) -> Optional[pl.DataFrame]:
+        """Load comments from parquet file with caching."""
+        if self._comments_cache is None and self.comments_file.exists():
+            self._comments_cache = pl.read_parquet(self.comments_file)
+        return self._comments_cache
+
+    def format_comments(self, comments: pl.DataFrame, parent_id: str) -> List[Dict]:
+        """
+        Format comments and their replies recursively.
+
+        Args:
+            comments: DataFrame containing all comments
+            parent_id: ID of the parent post or comment
+
+        Returns:
+            List of formatted comments with nested replies
+        """
+        replies = comments.filter(pl.col("parent_id") == parent_id)
+
+        return [
+            {
+                "comment_id": comment["comment_id"],
+                "text": comment["text"],
+                "image": self._extract_filename(comment["image_path"]),
+                "replies": self.format_comments(comments, comment["comment_id"]),
+            }
+            for comment in replies.iter_rows(named=True)
+        ]
+
+    def get_chunked_posts(self, chunk: int, chunk_size: int) -> Dict:
+        """
+        Get a chunk of posts with their comments.
+
+        Args:
+            chunk: Chunk number (1-based)
+            chunk_size: Number of posts per chunk
+
+        Returns:
+            Dict with chunk ID and list of posts with their comments
+        """
+        posts = self.load_posts()
+        comments = self.load_comments()
+
+        if posts is None or comments is None:
+            return {"id": chunk, "posts": []}
+
+        start_idx = (chunk - 1) * chunk_size
+        end_idx = start_idx + chunk_size
+
+        chunked_posts = (
+            posts[start_idx:end_idx]
+            .select(["post_id", "title", "image_path", "text", "created_time"])
+            .to_dicts()
+        )
+
+        formatted_posts = []
+        for post in chunked_posts:
+    
+            post_comments = self.format_comments(comments, post["post_id"]) if comments is not None else []
+            
+            formatted_posts.append({
+                "id": post["post_id"],
+                "title": post["title"],
+                "image": self._extract_filename(post["image_path"]),
+                "text": post["text"],
+                "created_time": post["created_time"],
+                "comments": post_comments,
+                "commentCount": len(post_comments)
+            })
+        
+        
+
+        return {"id": chunk, "posts": formatted_posts}
+
+    def get_total_chunks(self, chunk_size: int) -> int:
+        """Calculate total number of chunks based on post count."""
+        posts = self.load_posts()
+        if posts is None:
+            return 0
+        return ceil(len(posts) / chunk_size)
+    
+    def get_comments_for_post(self, post_id: str) -> List[Dict]:
+        """Get comments for a specific post."""
+        comments = self.load_comments()
+        if comments is None:
+            return []
+        
+        return self.format_comments(comments, post_id)
+
+
+# Initialize Flask app
 app = Flask(__name__)
 
-# Define paths
+# Configuration
 SUBREDDIT_NAME = "dataengineering"
-BASE_DIR = Path(__file__).resolve().parent.parent / "scraped_subreddits"
-SUBREDDIT_DIR = BASE_DIR / f"reddit_data_{SUBREDDIT_NAME}"
-POSTS_FILE = SUBREDDIT_DIR / f"reddit_posts_{SUBREDDIT_NAME}.parquet"
-COMMENTS_FILE = SUBREDDIT_DIR / f"reddit_comments_{SUBREDDIT_NAME}.parquet"
-IMAGE_DIR = SUBREDDIT_DIR / f"images_{SUBREDDIT_NAME}"
+CHUNK_SIZE = 5  # Number of posts per chunk
+
+# Initialize data manager
+data_manager = RedditDataManager(SUBREDDIT_NAME)
 
 
-
-# Parameters
-chunk_size = 5 # Number of posts per chunk
-
-
-# Ensure the image directory exists
-os.makedirs(IMAGE_DIR, exist_ok=True)
-
-# Function to load posts from the Parquet file
-def load_posts():
-    return pl.read_parquet(POSTS_FILE) if POSTS_FILE.exists() else None
-
-
-# Function to load comments from the Parquet file
-def load_comments():
-    return pl.read_parquet(COMMENTS_FILE) if COMMENTS_FILE.exists() else None
-
-
-# Function to format comments and replies
-def format_comments(comments, parent_id):
-    replies = comments.filter(pl.col("parent_id") == parent_id)
-
-    return [
-        {
-            "comment_id": comment["comment_id"],
-            "text": comment["text"],
-            "image": comment["image_path"].split("\\")[-1] if comment["image_path"] else None,
-            "replies": format_comments(comments, comment["comment_id"]),
-        }
-        for comment in replies.iter_rows(named=True)
-    ]
-
-# Serve Images
 @app.route("/images/<filename>")
 def serve_image(filename):
-    return send_from_directory(IMAGE_DIR, filename)
+    """Serve images from the image directory."""
+    return send_from_directory(data_manager.image_dir, filename)
 
-# Route to load posts dynamically
-@app.route("/load_posts")
-def get_chunked_posts():
-    chunk = int(request.args.get("chunk", 1))  # Get chunk number from request
-    start_idx = (chunk - 1) * chunk_size
-    end_idx = start_idx + chunk_size
 
-    # Load posts and comments
-    posts = load_posts()
-    comments = load_comments()
-
-    if posts is None or comments is None:
-        return jsonify({"error": "No posts or comments found."}), 404
+@app.route("/api/chunks/<int:chunk>")
+def get_chunked_posts(chunk):
+    """API endpoint to load posts dynamically by chunk."""
+    chunk_data = data_manager.get_chunked_posts(chunk, CHUNK_SIZE)
     
-    chunked_posts = posts[start_idx:end_idx].select(["post_id", "title", "image_path", "text"]).to_dicts()
-
-
-    data = [
-        {
-            "post_id": post["post_id"],
-            "title": post["title"],
-            "image": post["image_path"].split("\\")[-1] if post["image_path"] else None,
-            "text": post["text"],
-            "comments": format_comments(comments, post["post_id"]),
-        }
-        for post in chunked_posts
-    ]
-
-    return jsonify({"posts": data})
-
-# Route to get total Chunks
-@app.route("/totalChunks")
-def get_total_chunks():
-    posts = load_posts()
-    
-    if posts is None:
+    if not chunk_data["posts"]:
         return jsonify({"error": "No posts found."}), 404
-    
-    totalChunks = ceil(len(posts) / chunk_size)
 
-    return jsonify({"totalChunks": totalChunks})  
+    return jsonify(chunk_data)
+
+
+@app.route("/api/chunks/count")
+def get_total_chunks():
+    """API endpoint to get the total number of chunks."""
+    total_chunks = data_manager.get_total_chunks(CHUNK_SIZE)
+
+    if total_chunks == 0:
+        return jsonify({"error": "No posts found."}), 404
+
+    return jsonify({"count": total_chunks})
+
+
+@app.route("/api/comments/<post_id>")
+def get_comments(post_id):
+    """API endpoint to get comments for a specific post."""
+    comments = data_manager.get_comments_for_post(post_id)
     
-# Route to render the main page
+    return jsonify({"comments": comments})
+
+
+@app.route("/load_posts")
+def legacy_get_posts():
+    """Legacy API endpoint for loading posts."""
+    chunk = int(request.args.get("chunk", 1))
+    return get_chunked_posts(chunk)
+
+
+@app.route("/totalChunks")
+def legacy_get_total_chunks():
+    """API endpoint for getting total chunks."""
+    return get_total_chunks()
+
+
 @app.route("/")
 def index():
-     return render_template("index.html", subreddit=SUBREDDIT_NAME)
-    
+    """Render the main page."""
+    return render_template("index.html", subreddit=SUBREDDIT_NAME)
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=8000)
