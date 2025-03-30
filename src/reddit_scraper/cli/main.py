@@ -1,14 +1,15 @@
 """
-Command-line interface for Reddit Explorer.
+Command-line interface for Reddit Scraper.
 
 This module provides a modern, user-friendly CLI for interacting with the
-Reddit Explorer application, built with Typer and Rich for great UX.
+Reddit Scraper application, built with Typer and Rich for great UX.
 """
 
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+import os
 
 import typer
 from rich.console import Console
@@ -21,6 +22,7 @@ from reddit_scraper.scrapers import get_available_scrapers
 from reddit_scraper.services.scraping_service import ScrapingService
 from reddit_scraper.utils.logging import configure_logging, get_logger
 from reddit_scraper.web.reddit_viewer_django_app import run_app
+from reddit_scraper.utils.validators import validate_subreddit_name, sanitize_subreddit_name
 
 # Initialize Typer app
 app = typer.Typer(
@@ -54,7 +56,7 @@ def main(
     ),
 ):
     """
-    Reddit Explorer - Professional Reddit Scraping Tool
+    Reddit Scraper - Professional Reddit Scraping Tool
     
     A modular, modern tool for scraping and browsing Reddit content.
     """
@@ -95,6 +97,11 @@ def scrape_command(
     This command fetches posts and comments from a subreddit using the
     specified scraping method and saves them to the local database.
     """
+    if not validate_subreddit_name(subreddit):
+        sanitized = sanitize_subreddit_name(subreddit)
+        console.print(f"[yellow]Warning:[/yellow] Subreddit name '{subreddit}' was sanitized to '{sanitized}'")
+        subreddit = sanitized
+
     try:
         # Convert date strings to datetime objects if provided
         before_date = None
@@ -108,6 +115,10 @@ def scrape_command(
         # Create the scraping service
         service = ScrapingService(subreddit, method.value)
         
+        # Get config to show data location
+        config = get_config()
+        storage_dir = config.storage.base_dir
+        
         # Show scraping parameters
         if not quiet:
             console.print(
@@ -118,6 +129,7 @@ def scrape_command(
             )
             console.print(f"Posts limit: {limit}")
             console.print(f"Comments limit per post: {comment_limit}")
+            console.print(f"Storage directory: {storage_dir}")
             if before_date:
                 console.print(f"Before: {before}")
             if after_date:
@@ -152,6 +164,7 @@ def scrape_command(
             table.add_row("Images downloaded", str(result.images_count))
             table.add_row("Errors", str(result.errors_count))
             table.add_row("Duration", f"{duration:.2f} seconds")
+            table.add_row("Storage location", str(storage_dir / f"reddit_data_{subreddit}"))
             
             console.print(table)
             
@@ -163,7 +176,7 @@ def scrape_command(
             
             console.print(
                 "\n[bold]Explore the data:[/bold] "
-                f"Run [cyan]reddit-explorer web[/cyan] and navigate to [cyan]r/{subreddit}[/cyan]"
+                f"Run [cyan]reddit-scraper web --subreddit={subreddit}[/cyan] and navigate to http://localhost:8000/"
             )
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
@@ -173,6 +186,9 @@ def scrape_command(
 
 @app.command("web")
 def web_command(
+    subreddit: Optional[str] = typer.Option(
+        None, "--subreddit", "-s", help="Subreddit to view (must be scraped first)"
+    ),
     host: Optional[str] = typer.Option(
         None, "--host", "-h", help="Host to bind to"
     ),
@@ -186,8 +202,8 @@ def web_command(
     """
     Start the web interface.
     
-    This command launches a Flask web server that provides a UI for
-    browsing the scraped Reddit content.
+    This command launches a web server that provides a UI for browsing
+    the scraped Reddit content.
     """
     try:
         # Get config for default values
@@ -197,12 +213,27 @@ def web_command(
         run_host = host or config.web.host
         run_port = port or config.web.port
         
+        # Set subreddit environment variable if provided
+        if subreddit:
+            os.environ["SUBREDDIT_NAME"] = subreddit
+        
         console.print(
             Panel.fit(
                 f"[bold]Starting web server[/bold] on [cyan]{run_host}:{run_port}[/cyan]",
                 border_style="green",
             )
         )
+        
+        if subreddit:
+            console.print(f"Showing data for r/{subreddit}")
+        else:
+            console.print(
+                "[yellow]No subreddit specified.[/yellow] "
+                "Please provide one with the --subreddit option or set it in the web app."
+            )
+        
+        storage_dir = config.storage.base_dir
+        console.print(f"Looking for data in: {storage_dir}")
         
         console.print(
             "Press [bold]Ctrl+C[/bold] to stop the server\n"
@@ -231,6 +262,9 @@ def info_command(
     or detailed information about a specific subreddit if provided.
     """
     try:
+        config = get_config()
+        base_dir = config.storage.base_dir
+        
         if subreddit:
             # Show detailed info about a specific subreddit
             service = ScrapingService(subreddit)
@@ -253,12 +287,17 @@ def info_command(
             
             table.add_row("Posts", str(data["total_posts"]))
             table.add_row("Comments", str(data["total_comments"]))
+            table.add_row("Data location", str(base_dir / f"reddit_data_{subreddit}"))
             
             console.print(table)
         else:
             # Show list of available subreddits
-            config = get_config()
-            base_dir = config.storage.base_dir
+            console.print(
+                Panel.fit(
+                    "[bold]Available Subreddits[/bold]",
+                    border_style="cyan",
+                )
+            )
             
             # Find all subreddit directories
             subreddits = []
@@ -281,29 +320,31 @@ def info_command(
                             })
             
             if not subreddits:
-                console.print("[yellow]No subreddits found.[/yellow] Try scraping some data first.")
-                return
-            
-            console.print(
-                Panel.fit(
-                    "[bold]Available Subreddits[/bold]",
-                    border_style="cyan",
+                console.print(
+                    f"[yellow]No subreddits found in {base_dir}.[/yellow] Try scraping some data first."
                 )
-            )
+                return
             
             table = Table(show_header=True, header_style="bold cyan")
             table.add_column("Subreddit")
             table.add_column("Posts")
             table.add_column("Comments")
+            table.add_column("Location")
             
             for subreddit in sorted(subreddits, key=lambda s: s["name"]):
                 table.add_row(
                     f"r/{subreddit['name']}",
                     str(subreddit["posts"]),
                     str(subreddit["comments"]),
+                    str(base_dir / f"reddit_data_{subreddit['name']}")
                 )
             
             console.print(table)
+            
+            console.print(
+                "\n[bold]View data:[/bold] "
+                "Run [cyan]reddit-scraper web --subreddit=SUBREDDIT[/cyan] to view a specific subreddit."
+            )
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
         logger.error(f"Error in info command: {e}", exc_info=True)
@@ -339,7 +380,7 @@ def methods_command() -> None:
             elif method == ScraperMethod.PULLPUSH:
                 description = "Uses the PullPush API. No credentials required, but has limitations."
             elif method == ScraperMethod.BROWSER:
-                description = "Uses Selenium + Beatiful Soup to scrape. No credentials required."
+                description = "Uses Selenium + Beautiful Soup to scrape. No credentials required."
             
             table.add_row(name, description)
         

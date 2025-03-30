@@ -20,22 +20,23 @@ load_dotenv()
 class RedditAPIConfig(BaseModel):
     """Configuration for Reddit API access."""
 
-    client_id: str = Field(..., description="Reddit API client ID")
-    client_secret: str = Field(..., description="Reddit API client secret")
-    user_agent: str = Field(..., description="Reddit API user agent")
+    client_id: str = Field("", description="Reddit API client ID")
+    client_secret: str = Field("", description="Reddit API client secret")
+    user_agent: str = Field("RedditScraper", description="Reddit API user agent")
+
 
 class StorageConfig(BaseModel):
     """Configuration for data storage."""
 
     base_dir: Path = Field(
-        default=Path("data"), description="Base directory for storing scraped data"
+        default=Path("scraped_subreddits"), description="Base directory for storing scraped data"
     )
     use_compression: bool = Field(default=True, description="Use compression for storage")
     compression_method: str = Field(
         default="zstd", description="Compression method for Parquet files"
     )
 
-    @field_validator("base_dir", pre=True)
+    @field_validator("base_dir", mode="before")
     def validate_base_dir(cls, v):
         """Convert string to Path and ensure directory exists."""
         if isinstance(v, str):
@@ -74,7 +75,7 @@ class LoggingConfig(BaseModel):
         default=True, description="Whether to save logs to file"
     )
     log_file: Optional[Path] = Field(
-        default=Path("logs/reddit_explorer.log"), description="Path to log file"
+        default=Path("logs/reddit_scraper.log"), description="Path to log file"
     )
     rotation: str = Field(
         default="500 MB", description="Log rotation size"
@@ -83,10 +84,10 @@ class LoggingConfig(BaseModel):
         default="10 days", description="Log retention period"
     )
 
-    @field_validator("log_file", pre=True)
-    def validate_log_file(cls, v, values):
+    @field_validator("log_file", mode="before")
+    def validate_log_file(cls, v, info):
         """Ensure log file directory exists if logging to file."""
-        if values.get("save_to_file", True) and v is not None:
+        if info.data.get("save_to_file", True) and v is not None:
             if isinstance(v, str):
                 path = Path(v)
             else:
@@ -99,7 +100,7 @@ class LoggingConfig(BaseModel):
 class AppConfig(BaseModel):
     """Main application configuration."""
 
-    reddit_api: RedditAPIConfig
+    reddit_api: RedditAPIConfig = Field(default_factory=RedditAPIConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
@@ -120,7 +121,7 @@ def get_config() -> AppConfig:
             user_agent=os.getenv("REDDIT_USER_AGENT", "RedditScraper"),
         ),
         storage=StorageConfig(
-            base_dir=Path(os.getenv("STORAGE_BASE_DIR", "data")),
+            base_dir=Path(os.getenv("STORAGE_BASE_DIR", "scraped_subreddits")),
             use_compression=os.getenv("STORAGE_USE_COMPRESSION", "true").lower() == "true",
             compression_method=os.getenv("STORAGE_COMPRESSION_METHOD", "zstd"),
         ),
@@ -155,10 +156,12 @@ def get_image_dir(subreddit_name: str) -> Path:
 def get_posts_file(subreddit_name: str) -> Path:
     """Get the path to the posts file for a specific subreddit."""
     subreddit_dir = get_subreddit_dir(subreddit_name)
+    subreddit_dir.mkdir(parents=True, exist_ok=True)
     return subreddit_dir / f"reddit_posts_{subreddit_name}.parquet"
 
 
 def get_comments_file(subreddit_name: str) -> Path:
     """Get the path to the comments file for a specific subreddit."""
     subreddit_dir = get_subreddit_dir(subreddit_name)
+    subreddit_dir.mkdir(parents=True, exist_ok=True)
     return subreddit_dir / f"reddit_comments_{subreddit_name}.parquet"

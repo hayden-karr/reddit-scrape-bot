@@ -13,6 +13,10 @@ from typing import Dict, Generator, List, Optional, Tuple, Union
 
 from reddit_scraper.constants import ContentType
 from reddit_scraper.core.models import RedditComment, RedditPost, ScrapingResult
+from reddit_scraper.services.image_service import ImageService
+from reddit_scraper.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BaseScraper(abc.ABC):
@@ -32,6 +36,11 @@ class BaseScraper(abc.ABC):
         """
         self.subreddit = subreddit
         self.result = ScrapingResult(subreddit=subreddit)
+        
+        # Initialize image service for all scrapers
+        self.image_service = ImageService(subreddit)
+        
+        logger.debug(f"BaseScraper initialized for r/{subreddit}")
     
     @abc.abstractmethod
     def fetch_posts(
@@ -75,7 +84,18 @@ class BaseScraper(abc.ABC):
         """
         pass
     
-    @abc.abstractmethod
+    def extract_image_url(self, text: str) -> Optional[str]:
+        """
+        Extract an image URL from text content using ImageService.
+        
+        Args:
+            text: Text to extract image URL from
+            
+        Returns:
+            Extracted image URL, or None if no image was found
+        """
+        return self.image_service.extract_image_url(text)
+    
     def download_image(
         self, 
         image_url: Optional[str], 
@@ -83,7 +103,7 @@ class BaseScraper(abc.ABC):
         content_type: ContentType
     ) -> Optional[str]:
         """
-        Download an image from a URL and save it to the appropriate location.
+        Download an image from a URL using ImageService.
         
         Args:
             image_url: URL of the image to download
@@ -93,20 +113,7 @@ class BaseScraper(abc.ABC):
         Returns:
             Path to the saved image, or None if no image was downloaded
         """
-        pass
-    
-    @abc.abstractmethod
-    def extract_image_url(self, text: str) -> Optional[str]:
-        """
-        Extract an image URL from text content.
-        
-        Args:
-            text: Text to extract image URL from
-            
-        Returns:
-            Extracted image URL, or None if no image was found
-        """
-        pass
+        return self.image_service.download_image(image_url, item_id, content_type)
     
     def scrape(
         self,
