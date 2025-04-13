@@ -24,13 +24,14 @@ _scraper_registry: Dict[str, Type[BaseScraper]] = {
 }
 
 
-def create_scraper(method: str, subreddit: str) -> BaseScraper:
+def create_scraper(method: str, subreddit: str, image_service=None) -> BaseScraper:
     """
     Create a scraper instance for the specified method and subreddit.
     
     Args:
         method: Scraping method to use
         subreddit: Name of the subreddit to scrape
+        image_service: Optional image service to pass to the scraper (if supported)
         
     Returns:
         Initialized scraper instance
@@ -43,7 +44,7 @@ def create_scraper(method: str, subreddit: str) -> BaseScraper:
     
     scraper_class = _scraper_registry[method]
     logger.info(f"Creating {scraper_class.__name__} for r/{subreddit}")
-    return scraper_class(subreddit)
+    return scraper_class(subreddit, image_service=image_service)
 
 
 def get_available_scrapers() -> Dict[str, str]:

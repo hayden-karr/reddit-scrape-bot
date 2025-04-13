@@ -1,0 +1,85 @@
+# pyproject.toml 
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reddit-scraper"
+version = "0.1.0"
+description = "A Reddit scraper with web interface"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+]
+dependencies = [
+    "typer[all]>=0.7.0", # Added [all] for rich
+    # "rich>=12.0.0", # No longer needed if using typer[all]
+    "praw>=7.6.0",
+    "pydantic>=2.0.0",
+    "requests>=2.28.0",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.6.0",
+    "polars>=0.17.0",
+    "pyarrow>=10.0.0",        
+    "pillow>=9.4.0",
+    "beautifulsoup4>=4.9.0",  
+    "selenium>=4.8.0",
+    "webdriver-manager>=3.8.5",
+    "django>=4.2.0",     
+    "fastapi>=0.95.0",
+    "uvicorn[standard]>=0.20.0",
+    "django-cors-headers>=3.14.0",
+    "whitenoise"
+    # Add zstandard if needed for compression
+    # "zstandard"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov", 
+    "black>=23.1.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "flake8>=6.0.0",
+    # Alternatively, consider "ruff" to replace black, isort, flake8
+]
+
+[project.scripts]
+reddit-scraper = "reddit_scraper.cli.main:app"
+
+[tool.setuptools] 
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+# Add these if you want stricter checks (optional)
+# check_untyped_defs = true
+# disallow_untyped_decorators = true
+# no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["praw.*", "polars.*", "selenium.*", "bs4.*", "PIL.*", "dotenv.*", "requests.*", "prawcore.*", "webdriver_manager.*", "django.*", "fastapi.*", "uvicorn.*", "starlette.*"]
+ignore_missing_imports = true

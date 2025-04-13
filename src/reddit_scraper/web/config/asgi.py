@@ -15,8 +15,9 @@ from django.conf import settings
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
+from starlette.routing import Mount, Router
 from starlette.types import ASGIApp
+from whitenoise import WhiteNoise
 
 # Configure Django settings module
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
@@ -45,7 +46,7 @@ def get_fastapi_app() -> FastAPI:
         The FastAPI application instance
     """
     try:
-        from reddit_viewer.api.main import app as fastapi_app
+        from reddit_scraper.web.reddit_viewer.fast_api.main import app as fastapi_app
         return fastapi_app
     except ImportError as e:
         logger.error(f"Error importing FastAPI app: {str(e)}", exc_info=True)
@@ -70,22 +71,33 @@ def create_hybrid_asgi_app() -> ASGIApp:
     try:
         # Get FastAPI app
         fastapi_app = get_fastapi_app()
-        
-        # Create a hybrid application that routes to Django or FastAPI based on the path
-        # Routes starting with /api/ go to FastAPI, everything else goes to Django
-        from starlette.routing import Router
-        
+
+        print(settings.MEDIA_ROOT)
+
+        # --- MOUNT the apps ---
+        # Serve static files at /static, media at /images, API at /api, Django everywhere else
         routes = [
             Mount("/api", app=fastapi_app, name="api"),
+            Mount(
+                "/images",
+                app=StaticFiles(directory=settings.MEDIA_ROOT),
+                name="media"
+            ),
+            Mount(
+                "/static",
+                app=StaticFiles(directory=settings.STATIC_ROOT),
+                name="static"
+            ),
             Mount("/", app=django_app, name="django"),
         ]
-        
+
         # Create the combined router
         return Router(routes=routes)
     except Exception as e:
         logger.error(f"Error creating hybrid ASGI app: {str(e)}", exc_info=True)
-        # Return just Django as a fallback
+        # Return just the original Django app as a fallback (might not serve static files)
         return django_app
+
 
 
 # Create the hybrid application

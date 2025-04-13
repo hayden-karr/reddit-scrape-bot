@@ -10,12 +10,13 @@ from typing import Dict, List, Set, Tuple
 
 # File and data constants
 DEFAULT_POST_LIMIT = 100
+DEFAULT_COMMENT_LIMIT = None
 DEFAULT_CHUNK_SIZE = 5
 PARQUET_COMPRESSION = "zstd"
 
 # Image constants
 IMAGE_QUALITY = 80
-IMAGE_FORMAT = "WEBP"
+IMAGE_FORMAT = "AVIF"
 MAX_IMAGE_PIXELS = 25000000  # Limit to prevent decompression bombs
 
 # Valid image extensions for URL detection
@@ -56,27 +57,47 @@ class ContentType(str, Enum):
     POST = "post"
     COMMENT = "comment"
 
+class RedditSort(str, Enum):
+    """Enumeration for Reddit post sorting methods"""
+    NEW = "new"
+    HOT = "hot"
+    TOP = "top"
+    RISING = "rising"
+    CONTROVERSIAL = "controversial"
+
+class TopTimeFilter(str, Enum):
+    """Enumeration for 'top' posts time filters."""
+    HOUR = "hour"
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
+    ALL = "all"
+
+
 
 # Schema definitions for Polars DataFrames
-POST_SCHEMA: Dict[str, str] = {
-    "post_id": "str",
-    "title": "str",
-    "text": "str",
-    "created_utc": "i64",
-    "created_time": "str",
-    "image_url": "str",
-    "image_path": "str",
+import polars as pl
+
+POST_SCHEMA: Dict[str, pl.DataType] = {
+    "id": pl.String,
+    "title": pl.String,
+    "text": pl.String,
+    "created_utc": pl.Int64,
+    "created_time": pl.String,
+    "image_url": pl.String,
+    "image_path": pl.String,
 }
 
-COMMENT_SCHEMA: Dict[str, str] = {
-    "comment_id": "str",
-    "post_id": "str",
-    "parent_id": "str",
-    "text": "str",
-    "created_utc": "i64",
-    "created_time": "str",
-    "image_url": "str",
-    "image_path": "str",
+COMMENT_SCHEMA: Dict[str, pl.DataType] = {
+    "id": pl.String,
+    "post_id": pl.String,
+    "parent_id": pl.String,
+    "text": pl.String,
+    "created_utc": pl.Int64,
+    "created_time": pl.String,
+    "image_url": pl.String,
+    "image_path": pl.String,
 }
 
 # Default fields to fetch from PullPush API

@@ -83,7 +83,7 @@ class RedditDataStorage:
             new_data = pl.DataFrame(post_dicts)
             
             # Apply schema to ensure consistent types
-            schema = {k: pl.datatypes.dtype_short_repr_mapping.get(v) for k, v in POST_SCHEMA.items()}
+            schema = POST_SCHEMA
             new_data = new_data.cast(schema)
             
             # Load existing data if file exists
@@ -91,7 +91,8 @@ class RedditDataStorage:
                 existing_df = pl.read_parquet(self.posts_file)
                 # Append new data and remove duplicates
                 df = pl.concat([existing_df, new_data], how="vertical")
-                df = df.unique(subset=["id"])
+                # Keep the last occurrence (latest info) for each post id, never delete old posts
+                df = df.unique(subset=["id"], keep="last")
             else:
                 df = new_data
             
@@ -135,7 +136,7 @@ class RedditDataStorage:
             new_data = pl.DataFrame(comment_dicts)
             
             # Apply schema to ensure consistent types
-            schema = {k: pl.datatypes.dtype_short_repr_mapping.get(v) for k, v in COMMENT_SCHEMA.items()}
+            schema = COMMENT_SCHEMA
             new_data = new_data.cast(schema)
             
             # Load existing data if file exists
@@ -143,7 +144,8 @@ class RedditDataStorage:
                 existing_df = pl.read_parquet(self.comments_file)
                 # Append new data and remove duplicates
                 df = pl.concat([existing_df, new_data], how="vertical")
-                df = df.unique(subset=["id"])
+                # Keep the last occurrence (latest info) for each comment id, never delete old comments
+                df = df.unique(subset=["id"], keep="last")
             else:
                 df = new_data
             

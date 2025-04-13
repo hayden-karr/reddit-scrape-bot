@@ -20,20 +20,21 @@ class RedditContent(BaseModel):
     id: str = Field(..., description="Unique identifier")
     text: str = Field(..., description="Content text")
     created_utc: int = Field(..., description="Creation timestamp (UTC)")
-    created_time: str = Field(
-        ..., description="Human-readable creation time"
+    created_time: Optional[str] = Field(
+        default=None, description="Human-readable creation time"
     )
     image_url: Optional[str] = Field(None, description="URL of associated image")
     image_path: Optional[str] = Field(None, description="Local path to saved image")
     
-    @field_validator("created_time", pre=True)
-    def validate_created_time(cls, v, values):
-        """Generate created_time from created_utc if not provided."""
-        if not v and "created_utc" in values:
-            return datetime.fromtimestamp(
-                values["created_utc"]
-            ).strftime("%Y-%m-%d %H:%M:%S")
-        return v
+    @classmethod
+    def model_validate(cls, data):
+        if "created_time" not in data or data["created_time"] is None:
+            created_utc = data.get("created_utc")
+            if created_utc is not None:
+                data["created_time"] = datetime.fromtimestamp(
+                    created_utc
+                ).strftime("%Y-%m-%d %H:%M:%S")
+        return super().model_validate(data)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert model to a dictionary suitable for storage."""

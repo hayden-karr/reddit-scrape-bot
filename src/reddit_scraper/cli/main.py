@@ -17,11 +17,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from reddit_scraper.config import get_config
-from reddit_scraper.constants import ScraperMethod
+from reddit_scraper.constants import ScraperMethod, RedditSort, TopTimeFilter
 from reddit_scraper.scrapers import get_available_scrapers
 from reddit_scraper.services.scraping_service import ScrapingService
 from reddit_scraper.utils.logging import configure_logging, get_logger
-from reddit_scraper.web.reddit_viewer_django_app import run_app
+from reddit_scraper.web.reddit_viewer import run_app
 from reddit_scraper.utils.validators import validate_subreddit_name, sanitize_subreddit_name
 
 # Initialize Typer app
@@ -68,15 +68,21 @@ def main(
 def scrape_command(
     subreddit: str = typer.Argument(..., help="Name of the subreddit to scrape"),
     method: ScraperMethod = typer.Option(
-        ScraperMethod.PRAW,
-        "--method", "-m",
-        help="Scraping method to use",
+        ScraperMethod.PRAW, "--method", "-m", help="Scraping method to use",
     ),
     limit: int = typer.Option(
         100, "--limit", "-l", help="Maximum number of posts to scrape"
     ),
     comment_limit: int = typer.Option(
         100, "--comment-limit", "-c", help="Maximum number of comments per post"
+    ),
+    sort: RedditSort = typer.Option(
+        RedditSort.NEW, "--sort", "-s", case_sensitive=False,
+        help="Sort order for posts (new, hot, top)."
+    ),
+    time_filter: TopTimeFilter = typer.Option(
+        TopTimeFilter.ALL, "--time-filter", "-t", case_sensitive=False,
+        help="Time filter for 'top' sort (hour, day, week, month, year, all)."
     ),
     before: Optional[str] = typer.Option(
         None, "--before", "-b", help="Only fetch content before this date (YYYY-MM-DD)"
@@ -101,6 +107,10 @@ def scrape_command(
         sanitized = sanitize_subreddit_name(subreddit)
         console.print(f"[yellow]Warning:[/yellow] Subreddit name '{subreddit}' was sanitized to '{sanitized}'")
         subreddit = sanitized
+
+    # Validate time_filter usage
+    if sort != RedditSort.TOP and time_filter != TopTimeFilter.ALL:
+         console.print(f"[yellow]Warning:[/yellow] --time-filter '{time_filter.value}' is only applicable when --sort=top. Ignoring time filter.")
 
     try:
         # Convert date strings to datetime objects if provided
@@ -127,6 +137,9 @@ def scrape_command(
                     border_style="green",
                 )
             )
+            console.print(f"Sort order: {sort.value}")
+            if sort == RedditSort.TOP:
+                console.print(f"Top time filter: {time_filter.value}")
             console.print(f"Posts limit: {limit}")
             console.print(f"Comments limit per post: {comment_limit}")
             console.print(f"Storage directory: {storage_dir}")
@@ -142,6 +155,8 @@ def scrape_command(
         result = service.scrape_and_store(
             post_limit=limit,
             comment_limit=comment_limit,
+            sort_order=sort, 
+            time_filter=time_filter, 
             before=before_date,
             after=after_date,
             download_images=not no_images,
@@ -246,6 +261,65 @@ def web_command(
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
         logger.error(f"Error in web command: {e}", exc_info=True)
+        raise typer.Exit(code=1)
+    
+@app.command("flask")
+def flask_command(
+    host: Optional[str] = typer.Option(
+        None, "--host", "-h", help="Host to bind to"
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", "-p", help="Port to bind to"
+    ),
+    debug: bool = typer.Option(
+        False, "--debug", "-d", help="Run in debug mode"
+    ),
+    subreddit: Optional[str] = typer.Option(
+        None, "--subreddit", "-s", help="Subreddit to view (overrides config/env)"
+    ),
+    chunk_size: Optional[int] = typer.Option(
+        None, "--chunk-size", "-c", help="Number of posts per chunk (overrides config/env)"
+    ),
+) -> None:
+    """
+    Start the Flask web interface.
+    
+    This command launches a lightweight Flask web server that provides
+    a simpler UI for browsing the scraped Reddit content.
+    """
+    try:
+        # Get config for default values
+        config = get_config()
+        
+        # Use provided values or fall back to config
+        run_host = host or config.web.host
+        run_port = port or config.web.port
+        
+        console.print(
+            Panel.fit(
+                f"[bold]Starting Flask web server[/bold] on [cyan]{run_host}:{run_port}[/cyan]",
+                border_style="green",
+            )
+        )
+        
+        console.print(
+            "Press [bold]Ctrl+C[/bold] to stop the server\n"
+        )
+        
+        # Run the Flask app
+        from reddit_scraper.web.flask_app import run_flask_app
+        run_flask_app(
+            host=run_host,
+            port=run_port,
+            debug=debug,
+            subreddit=subreddit,
+            chunk_size=chunk_size
+        )
+    except KeyboardInterrupt:
+        console.print("\n[bold green]Server stopped.[/bold green]")
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        logger.error(f"Error in flask command: {e}", exc_info=True)
         raise typer.Exit(code=1)
 
 

@@ -35,14 +35,15 @@ class PullPushScraper(BaseScraper):
     but has some limitations compared to the official API.
     """
     
-    def __init__(self, subreddit: str):
+    def __init__(self, subreddit: str, image_service: Optional[ImageService] = None):
         """
         Initialize the PullPush scraper.
         
         Args:
             subreddit: Name of the subreddit to scrape
+            image_service: Optional ImageService instance to use
         """
-        super().__init__(subreddit)
+        super().__init__(subreddit, image_service=image_service)
         
         # Initialize configuration
         self.config = get_config()
@@ -53,8 +54,11 @@ class PullPushScraper(BaseScraper):
             user_agent=get_user_agent()
         )
         
-        # Initialize the image service
-        self.image_service = ImageService(subreddit)
+        # Use provided image service or create a new one
+        if image_service is not None:
+            self.image_service = image_service
+        else:
+            self.image_service = ImageService(subreddit)
         
         # Keep track of seen post and comment IDs to avoid duplicates
         self.seen_post_ids: Set[str] = set()
@@ -131,8 +135,12 @@ class PullPushScraper(BaseScraper):
                 # Process the batch of posts
                 batch_yield_count = 0
                 for post_data in data:
-                    # Skip if we've already seen this post
+                    # Ensure post has an 'id'
                     post_id = post_data.get("id")
+                    if post_id is None:
+                        logger.warning(f"Skipping post with missing 'id': {post_data}")
+                        continue
+                    # Skip if we've already seen this post
                     if post_id in self.seen_post_ids:
                         logger.debug(f"Skipping duplicate post: {post_id}")
                         continue
@@ -263,8 +271,12 @@ class PullPushScraper(BaseScraper):
                 # Process the batch of comments
                 batch_yield_count = 0
                 for comment_data in data:
-                    # Skip if we've already seen this comment
+                    # Ensure comment has an 'id'
                     comment_id = comment_data.get("id")
+                    if comment_id is None:
+                        logger.warning(f"Skipping comment with missing 'id': {comment_data}")
+                        continue
+                    # Skip if we've already seen this comment
                     if comment_id in self.seen_comment_ids:
                         logger.debug(f"Skipping duplicate comment: {comment_id}")
                         continue

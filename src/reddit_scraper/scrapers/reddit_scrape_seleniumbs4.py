@@ -39,6 +39,7 @@ from reddit_scraper.exceptions import ScraperError
 from reddit_scraper.scrapers.base import BaseScraper
 from reddit_scraper.utils.http import create_retry_session, get_user_agent
 from reddit_scraper.utils.logging import get_logger
+from reddit_scraper.services.image_service import ImageService
 
 logger = get_logger(__name__)
 
@@ -51,14 +52,15 @@ class SeleniumScraper(BaseScraper):
     which doesn't require API credentials but is slower and more resource-intensive.
     """
     
-    def __init__(self, subreddit: str):
+    def __init__(self, subreddit: str, image_service: Optional["ImageService"] = None):
         """
         Initialize the Selenium scraper.
         
         Args:
             subreddit: Name of the subreddit to scrape
+            image_service: Optional ImageService instance to use
         """
-        super().__init__(subreddit)
+        super().__init__(subreddit, image_service=image_service)
         
         # Initialize configuration
         self.config = get_config()
@@ -66,14 +68,12 @@ class SeleniumScraper(BaseScraper):
         # Initialize webdriver
         self.driver = None
         
-        # Create an HTTP session for image downloads
-        self.session = create_retry_session()
-        
-        # Create the image directory
-        self.image_dir = get_image_dir(subreddit)
-        
-        # Configure image handling
-        Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+        # Use provided image service or create a new one
+        if image_service is not None:
+            self.image_service = image_service
+        else:
+            from reddit_scraper.services.image_service import ImageService
+            self.image_service = ImageService(subreddit)
         
         logger.info(f"Selenium scraper initialized for r/{subreddit}")
     
@@ -395,101 +395,20 @@ class SeleniumScraper(BaseScraper):
     
     def extract_image_url(self, text: str) -> Optional[str]:
         """
-        Extract an image URL from text content.
-        
-        Args:
-            text: Text to extract image URL from
-            
-        Returns:
-            Extracted image URL, or None if no image was found
+        Extract an image URL from text content using the shared image service.
         """
-        # If text is empty, return None
-        if not text:
-            return None
-            
-        # Check if text itself is an image URL
-        try:
-            parsed_url = urlparse(text)
-            path = parsed_url.path.lower()
-            
-            # Check if the URL has a valid image extension
-            if any(path.endswith(ext) for ext in VALID_IMAGE_EXTENSIONS):
-                return text
-            
-            # Check for Reddit's image hosting domains
-            if "i.redd.it" in text or "i.imgur.com" in text:
-                return text
-        except Exception:
-            pass
-        
-        # Otherwise, search for image URLs in the text
-        url_pattern = r'https?://[^\s)"]+\.(?:jpg|jpeg|png|gif|webp)(?:\?[^\s)]*)?'
-        matches = re.findall(url_pattern, text, re.IGNORECASE)
-        
-        if matches:
-            return matches[0]
-        
-        # Also check for Reddit and Imgur image links
-        reddit_imgur_pattern = r'https?://(?:i\.redd\.it|i\.imgur\.com)/[^\s)]+'
-        matches = re.findall(reddit_imgur_pattern, text, re.IGNORECASE)
-        
-        if matches:
-            return matches[0]
-        
-        return None
+        return self.image_service.extract_image_url(text)
     
     def download_image(
-        self, 
-        image_url: Optional[str], 
+        self,
+        image_url: Optional[str],
         item_id: str,
         content_type: ContentType
     ) -> Optional[str]:
         """
-        Download an image from a URL and save it to the appropriate location.
-        
-        Args:
-            image_url: URL of the image to download
-            item_id: ID of the post or comment
-            content_type: Whether this is a post or comment image
-            
-        Returns:
-            Path to the saved image, or None if no image was downloaded
+        Download an image from a URL using the shared image service.
         """
-        if not image_url:
-            return None
-        
-        # Create the image filename
-        prefix = "comment_" if content_type == ContentType.COMMENT else ""
-        image_path = self.image_dir / f"{prefix}{item_id}.{IMAGE_FORMAT.lower()}"
-        
-        # Skip if already downloaded
-        if image_path.exists():
-            logger.debug(f"Image already exists at {image_path}")
-            return str(image_path)
-        
-        try:
-            # First try standard headers
-            response = self.session.get(image_url, stream=True, timeout=10)
-            response.raise_for_status()
-        except requests.exceptions.RequestException:
-            try:
-                # Retry with browser-like headers
-                headers = {"User-Agent": get_user_agent()}
-                response = self.session.get(image_url, headers=headers, stream=True, timeout=10)
-                response.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Failed to download image {image_url}: {e}")
-                return None
-        
-        try:
-            # Process and save the image
-            image = Image.open(BytesIO(response.content))
-            image.save(image_path, IMAGE_FORMAT, quality=IMAGE_QUALITY)
-            logger.debug(f"Downloaded image to {image_path}")
-            return str(image_path)
-        except Exception as e:
-            logger.warning(f"Error processing image: {e}")
-            return None
+        return self.image_service.download_image(image_url, item_id, content_type)
     
     def _extract_post_id(self, element) -> Optional[str]:
         """Extract the post ID from a post element."""

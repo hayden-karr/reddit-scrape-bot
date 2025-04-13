@@ -121,10 +121,8 @@ class RequestsLogger:
         """
         Get hooks for the requests library.
         
-        Usage:
-            session.request(method, url, ..., hooks=logger.get_hooks())
+        Only the 'response' hook is supported by requests.
         """
         return {
-            "request": [self.log_request],
             "response": [self.log_response],
         }

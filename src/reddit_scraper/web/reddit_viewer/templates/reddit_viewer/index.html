@@ -1,0 +1,36 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Reddit Viewer for r/{{ subreddit }}">
+    <meta name="theme-color" content="#18181a">
+    <title>r/{{ subreddit }}</title>
+    <link rel="stylesheet" href="{% static 'reddit_viewer/css/styles.css' %}">
+    
+    <!-- CSP for security: restrict sources to same origin and necessary CDNs -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';">
+</head>
+
+<body>
+    <h1 id="subreddit-title">r/{{ subreddit }}</h1>
+    <div id="gallery"></div>
+    <div id="loading" class="loading-indicator">
+        <div class="spinner"></div> Loading...
+    </div>
+
+    <!-- Configuration for the viewer -->
+    <script id="viewer-config-data" type="application/json">
+        {
+            "chunkSize": {{ chunk_size }},
+            "debug": {% if debug %}true{% else %}false{% endif %}
+        }
+    </script>
+   
+    <!-- Main viewer script -->
+    <script src="{% static 'reddit_viewer/js/reddit-viewer.js' %}"></script>
+</body>
+
+</html>

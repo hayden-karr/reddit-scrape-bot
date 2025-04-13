@@ -29,7 +29,8 @@ class StorageConfig(BaseModel):
     """Configuration for data storage."""
 
     base_dir: Path = Field(
-        default=Path("scraped_subreddits"), description="Base directory for storing scraped data"
+        default=(Path(__file__).resolve().parent.parent.parent / "scraped_subreddits"),
+        description="Base directory for storing scraped data"
     )
     use_compression: bool = Field(default=True, description="Use compression for storage")
     compression_method: str = Field(
@@ -121,7 +122,7 @@ def get_config() -> AppConfig:
             user_agent=os.getenv("REDDIT_USER_AGENT", "RedditScraper"),
         ),
         storage=StorageConfig(
-            base_dir=Path(os.getenv("STORAGE_BASE_DIR", "scraped_subreddits")),
+            base_dir=(Path(__file__).resolve().parent.parent.parent / os.getenv("STORAGE_BASE_DIR", "scraped_subreddits")).resolve(),
             use_compression=os.getenv("STORAGE_USE_COMPRESSION", "true").lower() == "true",
             compression_method=os.getenv("STORAGE_COMPRESSION_METHOD", "zstd"),
         ),
