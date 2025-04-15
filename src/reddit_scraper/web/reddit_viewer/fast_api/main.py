@@ -17,6 +17,9 @@ from reddit_scraper.web.reddit_viewer.fast_api.router import api_router
 from reddit_scraper.web.reddit_viewer.services.data_manager import DataManagerException
 
 # Set up logging
+# Configure root logger level based on settings.DEBUG
+log_level = logging.DEBUG if settings.DEBUG else logging.INFO
+logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +86,7 @@ def create_app() -> FastAPI:
         # This is for direct API access to images without going through Django
         app.mount(
             "/images", 
-            StaticFiles(directory=settings.MEDIA_ROOT), 
+            StaticFiles(directory=__import__('pathlib').Path(settings.MEDIA_ROOT)),
             name="images"
         )
     except Exception as e:

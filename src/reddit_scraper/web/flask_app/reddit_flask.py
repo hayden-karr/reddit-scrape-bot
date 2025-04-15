@@ -18,6 +18,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from reddit_scraper.config import get_config
 
+
 class RedditDataManager:
     """Manager for Reddit data access and processing."""
 
@@ -34,7 +35,9 @@ class RedditDataManager:
         self.base_dir = config.storage.base_dir
         self.subreddit_dir = self.base_dir / f"reddit_data_{subreddit_name}"
         self.posts_file = self.subreddit_dir / f"reddit_posts_{subreddit_name}.parquet"
-        self.comments_file = self.subreddit_dir / f"reddit_comments_{subreddit_name}.parquet"
+        self.comments_file = (
+            self.subreddit_dir / f"reddit_comments_{subreddit_name}.parquet"
+        )
         self.image_dir = self.subreddit_dir / f"images_{subreddit_name}"
 
         # Ensure image directory exists
@@ -60,28 +63,41 @@ class RedditDataManager:
             self._comments_cache = pl.read_parquet(self.comments_file)
         return self._comments_cache
 
-    def format_comments(self, comments: pl.DataFrame, parent_id: str) -> List[Dict]:
+    def format_comments(self, comments: pl.DataFrame, post_id: str, is_post: bool = True) -> List[Dict]:
         """
         Format comments and their replies recursively.
 
         Args:
             comments: DataFrame containing all comments
-            parent_id: ID of the parent post or comment
+            post_id: ID of the post or comment
+            is_post: Whether we're looking for top-level comments (True) or replies (False)
 
         Returns:
             List of formatted comments with nested replies
         """
-        replies = comments.filter(pl.col("parent_id") == parent_id)
+        if is_post:
+            # For top-level comments, filter by post_id
+            replies = comments.filter(pl.col("post_id") == post_id)
+        else:
+            # For replies to comments, filter by parent_id
+            replies = comments.filter(pl.col("parent_id") == post_id)
 
         return [
             {
-                "comment_id": comment["comment_id"],
+                "comment_id": comment["id"],
                 "text": comment["text"],
                 "image": self._extract_filename(comment["image_path"]),
-                "replies": self.format_comments(comments, comment["comment_id"]),
+                "replies": self.format_comments(comments, comment["id"], is_post=False),
             }
             for comment in replies.iter_rows(named=True)
         ]
+
+    def get_comments_for_post(self, post_id: str) -> List[Dict]:
+        """Get comments for a specific post."""
+        comments = self.load_comments()
+        if comments is None:
+            return []
+        return self.format_comments(comments, post_id, is_post=True)
 
     def get_chunked_posts(self, chunk: int, chunk_size: int) -> Dict:
         """
@@ -105,23 +121,29 @@ class RedditDataManager:
 
         chunked_posts = (
             posts[start_idx:end_idx]
-            .select(["post_id", "title", "image_path", "text", "created_time"])
+            .select(["id", "title", "image_path", "text", "created_time"])
             .to_dicts()
         )
 
         formatted_posts = []
         for post in chunked_posts:
-            post_comments = self.format_comments(comments, post["post_id"]) if comments is not None else []
+            post_comments = (
+                self.format_comments(comments, post["id"], is_post=True)
+                if comments is not None
+                else []
+            )
 
-            formatted_posts.append({
-                "id": post["post_id"],
-                "title": post["title"],
-                "image": self._extract_filename(post["image_path"]),
-                "text": post["text"],
-                "created_time": post["created_time"],
-                "comments": post_comments,
-                "commentCount": len(post_comments)
-            })
+            formatted_posts.append(
+                {
+                    "id": post["id"],
+                    "title": post["title"],
+                    "image": self._extract_filename(post["image_path"]),
+                    "text": post["text"],
+                    "created_time": post["created_time"],
+                    "comments": post_comments,
+                    "commentCount": len(post_comments),
+                }
+            )
 
         return {"id": chunk, "posts": formatted_posts}
 
@@ -138,6 +160,7 @@ class RedditDataManager:
         if comments is None:
             return []
         return self.format_comments(comments, post_id)
+
 
 def create_app(subreddit_name: str, chunk_size: int) -> Flask:
     app = Flask(__name__)
@@ -191,21 +214,27 @@ def create_app(subreddit_name: str, chunk_size: int) -> Flask:
 
     return app
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Reddit Flask Data Viewer")
-    parser.add_argument("--subreddit", type=str, default=os.getenv("SUBREDDIT_NAME"),
-                        help="Subreddit to view (overrides config/env)")
-    parser.add_argument("--chunk-size", type=int, default=None,
-                        help="Number of posts per chunk (overrides config/env)")
+    parser.add_argument(
+        "--subreddit",
+        type=str,
+        default=os.getenv("SUBREDDIT_NAME"),
+        help="Subreddit to view (overrides config/env)",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=None,
+        help="Number of posts per chunk (overrides config/env)",
+    )
     args = parser.parse_args()
 
     config = get_config()
-    subreddit = args.subreddit or os.getenv("SUBREDDIT_NAME") or "dataengineering"
+    subreddit = args.subreddit or os.getenv("SUBREDDIT_NAME") 
     chunk_size = args.chunk_size or int(os.getenv("CHUNK_SIZE", 5))
 
     app = create_app(subreddit, chunk_size)
-    app.run(
-        debug=config.web.debug,
-        host=config.web.host,
-        port=config.web.port
-    )
+    app.run(debug=config.web.debug, host=config.web.host, port=config.web.port)
+

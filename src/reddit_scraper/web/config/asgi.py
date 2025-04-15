@@ -80,7 +80,7 @@ def create_hybrid_asgi_app() -> ASGIApp:
             Mount("/api", app=fastapi_app, name="api"),
             Mount(
                 "/images",
-                app=StaticFiles(directory=settings.MEDIA_ROOT),
+                app=StaticFiles(directory=Path(settings.MEDIA_ROOT)),
                 name="media"
             ),
             Mount(

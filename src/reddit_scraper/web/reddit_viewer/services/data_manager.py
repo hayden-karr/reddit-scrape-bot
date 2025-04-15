@@ -219,13 +219,14 @@ class RedditDataManager:
             logger.error(f"Error loading comments: {str(e)}", exc_info=True)
             raise DataLoadingException(f"Failed to load comments: {str(e)}") from e
 
-    def format_comments(self, comments: pl.DataFrame, parent_id: str) -> List[CommentDict]:
+    def format_comments(self, comments: pl.DataFrame, parent_id: str, is_post: bool = True) -> List[CommentDict]:
         """
         Format comments and their replies recursively.
 
         Args:
             comments: DataFrame containing all comments
             parent_id: ID of the parent post or comment
+            is_post: Whether parent_id refers to a post (True) or a comment (False)
 
         Returns:
             List of formatted comments with nested replies
@@ -237,18 +238,24 @@ class RedditDataManager:
             if comments is None:
                 return []
                 
-            replies = comments.filter(pl.col("parent_id").cast(str) == str(parent_id))
+            # For top-level comments, filter by post_id
+            # For replies to comments, filter by parent_id
+            if is_post:
+                replies = comments.filter(pl.col("post_id").cast(str) == str(parent_id))
+            else:
+                replies = comments.filter(pl.col("parent_id").cast(str) == str(parent_id))
             
             formatted_replies = []
             for comment in replies.iter_rows(named=True):
                 formatted_comment: CommentDict = {
-                    "comment_id": str(comment["comment_id"]),
+                    "comment_id": str(comment["id"]),
                     "text": comment["text"],
                     "image": self._extract_media_relative_path(comment["image_path"]),
-                    "replies": self.format_comments(comments, str(comment["comment_id"])),
+                    # Pass the comment ID for recursive calls, with is_post=False since we're looking for replies
+                    "replies": self.format_comments(comments, str(comment["id"]), is_post=False),
                 }
                 formatted_replies.append(formatted_comment)
-                
+                    
             return formatted_replies
         except Exception as e:
             logger.error(f"Error formatting comments for parent_id '{parent_id}': {str(e)}", exc_info=True)
@@ -298,27 +305,27 @@ class RedditDataManager:
             # Get the chunked posts from the dataframe
             chunked_posts = (
                 posts[start_idx:end_idx]
-                .select(["post_id", "title", "image_path", "text", "created_time"])
+                .select(["id", "title", "image_path", "text", "created_time"])
                 .to_dicts()
             )
 
             # Format each post with its comments
             formatted_posts: List[PostDict] = []
             for post in chunked_posts:
-                post_id = post["post_id"]
+                post_id = post["id"]  
                 
-                # Get comments for this post
+                # Get comments for this post, passing is_post=True since we're looking for top-level comments
                 post_comments = (
-                    self.format_comments(comments, str(post_id)) if comments is not None else []
+                    self.format_comments(comments, str(post_id), is_post=True) if comments is not None else []
                 )
                 
                 # Format the post with its comments
                 formatted_post: PostDict = {
-                    "id": str(post_id),
+                    "id": str(post_id), 
                     "title": post["title"],
                     "image": self._extract_media_relative_path(post["image_path"]),
                     "text": post["text"],
-                    "created_time": post["created_time"],
+                    "created_time": post["created_time"] or "", # Default to empty string if None
                     "comments": post_comments,
                     "commentCount": len(post_comments)
                 }
@@ -379,8 +386,8 @@ class RedditDataManager:
                 logger.warning(f"No comments found for post '{post_id}'")
                 return []
             
-            formatted_comments = self.format_comments(comments, post_id)
-            logger.debug(f"Retrieved {len(formatted_comments)} top-level comments for post '{post_id}'")
+            # Pass is_post=True since we're looking for top-level comments for a post
+            formatted_comments = self.format_comments(comments, post_id, is_post=True)
             return formatted_comments
         except Exception as e:
             logger.error(f"Error getting comments for post '{post_id}': {str(e)}", exc_info=True)
